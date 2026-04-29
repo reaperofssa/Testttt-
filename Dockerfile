@@ -39,6 +39,6 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome \
 COPY . /app
 RUN npm install string-similarity puppeteer puppeteer-extra puppeteer-extra-plugin-stealth express axios qs cors
 RUN npx puppeteer install
-npx puppeteer install chrome
+RUN npx @puppeteer/browsers install chrome@stable
 EXPOSE 7860
 CMD ["node", "app.js"]
