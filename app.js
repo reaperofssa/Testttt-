@@ -9,7 +9,18 @@ const PORT = 7860;
 app.get("/search", async (req, res) => {
   const animeQuery = req.query.q || "Naruto";
 
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await puppeteer.launch({
+  executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+  headless: "new",
+  args: [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--no-zygote",
+    "--single-process"
+  ],
+  dumpio: true
+});
   const page = await browser.newPage();
 
   try {
