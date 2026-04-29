@@ -285,39 +285,66 @@ app.get("/api/episode", async (req, res) => {
   try {
     const result = await withPage(async (page) => {
       await page.goto(playUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
-
-      // Wait for the resolution menu to appear
       await page.waitForSelector("#resolutionMenu", { timeout: 10000 }).catch(() => {});
-
-      // Small wait for JS to populate buttons
       await new Promise((r) => setTimeout(r, 2000));
 
       const links = await page.evaluate(() => {
-        const result = { sub: {}, dub: {} };
+        // ── Stream links ──────────────────────────────────────────────────────
+        // Keyed by audio language, each entry is an array of source objects
+        // e.g. { jpn: [{fansub,resolution,av1,url}, ...], eng: [...], kor: [...] }
+        const stream = {};
 
-        // Streaming buttons
         document.querySelectorAll("#resolutionMenu button[data-src]").forEach((btn) => {
-          const quality = (btn.getAttribute("data-resolution") || "") + "p";
-          const audio = btn.getAttribute("data-audio");
-          const url = btn.getAttribute("data-src");
-          if (audio === "jpn") result.sub[quality] = url;
-          else if (audio === "eng") result.dub[quality] = url;
+          const fansub     = btn.getAttribute("data-fansub")     || "unknown";
+          const resolution = btn.getAttribute("data-resolution") || "?";
+          const audio      = btn.getAttribute("data-audio")      || "unknown";
+          const av1        = btn.getAttribute("data-av1") === "1";
+          const url        = btn.getAttribute("data-src");
+
+          if (!url) return;
+          if (!stream[audio]) stream[audio] = [];
+          stream[audio].push({ fansub, resolution: resolution + "p", av1, url });
         });
 
-        // Download links
-        document.querySelectorAll('#pickDownload a[href*="pahe.win"]').forEach((a) => {
-          const text = a.innerText.trim().toLowerCase();
+        // ── Download links ────────────────────────────────────────────────────
+        // Keyed by audio language, each entry is an array of download objects
+        // e.g. { jpn: [{fansub,resolution,size,url}, ...], eng: [...] }
+        // Text format on page: "FLE · 720p (108MB)" with optional badge "eng"/"kor"
+        const download = {};
+
+        document.querySelectorAll("#pickDownload a").forEach((a) => {
           const href = a.href;
-          const isDub = text.includes("eng");
-          const target = isDub ? result.dub : result.sub;
+          if (!href) return;
 
-          if (text.includes("1080")) target["1080p_download"] = href;
-          else if (text.includes("720")) target["720p_download"] = href;
-          else if (text.includes("480")) target["480p_download"] = href;
-          else if (text.includes("360")) target["360p_download"] = href;
+          // Clone so we can read text without badge noise
+          const clone = a.cloneNode(true);
+
+          // Pull out badge texts (audio language indicators like "eng", "kor")
+          const badges = [...clone.querySelectorAll(".badge-warning")].map(b =>
+            b.textContent.trim().toLowerCase()
+          );
+          // Remove badges from clone so they don't pollute the main text parse
+          clone.querySelectorAll(".badge").forEach(b => b.remove());
+
+          const rawText = clone.textContent.trim(); // e.g. "FLE · 720p (108MB)"
+
+          // Parse fansub (text before ·), resolution (e.g. 720p), size (e.g. 108MB)
+          const fansubMatch    = rawText.match(/^([^\s·]+)/);
+          const resolutionMatch = rawText.match(/(\d+p)/i);
+          const sizeMatch      = rawText.match(/\(([^)]+)\)/);
+
+          const fansub     = fansubMatch     ? fansubMatch[1]     : "unknown";
+          const resolution = resolutionMatch ? resolutionMatch[1] : "?";
+          const size       = sizeMatch       ? sizeMatch[1]       : null;
+
+          // Determine audio language — badge takes priority, fallback to "jpn" (sub)
+          const audio = badges.length > 0 ? badges[0] : "jpn";
+
+          if (!download[audio]) download[audio] = [];
+          download[audio].push({ fansub, resolution, size, url: href });
         });
 
-        return result;
+        return { stream, download };
       });
 
       return { links, playUrl };
