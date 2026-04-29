@@ -88,7 +88,18 @@ app.get("/info", async (req, res) => {
     return res.status(400).json({ error: "Invalid or missing AnimePahe URL." });
   }
 
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await puppeteer.launch({
+  executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+  headless: "new",
+  args: [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--no-zygote",
+    "--single-process"
+  ],
+  dumpio: true
+});
   const page = await browser.newPage();
 
   try {
@@ -184,7 +195,18 @@ app.get('/api/episode', async (req, res) => {
     return res.status(400).json({ error: 'id and episode query parameters are required' });
   }
 
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await puppeteer.launch({
+  executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+  headless: "new",
+  args: [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--no-zygote",
+    "--single-process"
+  ],
+  dumpio: true
+});
   const page = await browser.newPage();
 
   try {
