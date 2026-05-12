@@ -1,6 +1,5 @@
 // server.js
 const express = require("express");
-const axios = require("axios");
 const puppeteer = require("puppeteer");
 const stringSimilarity = require("string-similarity");
 const app = express();
@@ -76,23 +75,59 @@ async function withPage(fn) {
   }
 }
 
-// ─── AnimePahe API helper (no browser needed) ────────────────────────────────
-// AnimePahe exposes a public API that we can call directly with axios.
-// This is MUCH faster than loading pages with Puppeteer.
+// ─── Spoof helper ─────────────────────────────────────────────────────────────
+// Rotate through realistic UA strings and add all the headers a real browser sends.
+const UA_POOL = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+];
+
+function buildHeaders(extra = {}) {
+  const ua = UA_POOL[Math.floor(Math.random() * UA_POOL.length)];
+  return {
+    "User-Agent": ua,
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "X-Requested-With": "XMLHttpRequest",
+    "Referer": "https://animepahe.pw/",
+    "Origin": "https://animepahe.pw",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-CH-UA": `"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"`,
+    "Sec-CH-UA-Mobile": "?0",
+    "Sec-CH-UA-Platform": '"Windows"',
+    "Connection": "keep-alive",
+    ...extra,
+  };
+}
+
+// ─── AnimePahe API helper (browser-based, replaces axios version) ─────────────
+// Runs inside a page that has already loaded animepahe.pw so all
+// DDoS-Guard cookies/tokens are automatically included in the fetch.
 
 async function paheApi(params) {
-  const url = "https://animepahe.pw/api";
-  const res = await axios.get(url, {
-    params,
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-      Referer: "https://animepahe.pw/",
-      Cookie: "__ddg1_=; __ddg2_=",       // bypass basic bot checks
-    },
-    timeout: 10000,
+  return withPage(async (page) => {
+    // Establish session first so cookies are set
+    await page.goto("https://animepahe.pw", {
+      waitUntil: "domcontentloaded",
+      timeout: 20000,
+    });
+
+    const qs = new URLSearchParams(params).toString();
+    const url = `https://animepahe.pw/api?${qs}`;
+    const headers = buildHeaders();
+
+    const data = await page.evaluate(async (apiUrl, hdrs) => {
+      const res = await fetch(apiUrl, { headers: hdrs });
+      if (!res.ok) throw new Error(`API ${res.status}`);
+      return res.json();
+    }, url, headers);
+
+    return data;
   });
-  return res.data;
 }
 
 // ─── GET /search ─────────────────────────────────────────────────────────────
@@ -113,17 +148,13 @@ app.get("/search", async (req, res) => {
 
       // Now call the search API from within the browser context —
       // it will carry the correct cookies, Referer, and X-Requested-With header
-      const result = await page.evaluate(async (query) => {
+      const headers = buildHeaders();
+      const result = await page.evaluate(async (query, hdrs) => {
         const url = `https://animepahe.pw/api?m=search&q=${encodeURIComponent(query)}`;
-        const res = await fetch(url, {
-          headers: {
-            Accept: "application/json, text/javascript, */*; q=0.01",
-            "X-Requested-With": "XMLHttpRequest",
-          },
-        });
+        const res = await fetch(url, { headers: hdrs });
         if (!res.ok) throw new Error(`Search API returned ${res.status}`);
         return await res.json();
-      }, q);
+      }, q, headers);
 
       return result;
     });
@@ -217,6 +248,7 @@ app.get("/info", async (req, res) => {
       if (!json?.data?.length) break;
       totalEpisodes += json.data.length;
       if (json.last_page && p >= json.last_page) break;
+      await new Promise(r => setTimeout(r, 300)); // small gap between pages
     }
 
     return res.json({ ...data, totalEpisodes });
